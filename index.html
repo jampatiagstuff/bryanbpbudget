@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bryan's Bachelor Party Budget</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F2F6; }
+  * { box-sizing: border-box; }
+  .bp-input:focus { outline: 2px solid #A78BFA; outline-offset: 1px; }
+  .bp-icon-btn:focus-visible { outline: 2px solid #A78BFA; outline-offset: 2px; }
+  .bp-row:hover .bp-trash { opacity: 1; }
+  .bp-trash { opacity: 0; transition: opacity 0.15s ease; }
+  @media (hover: none) { .bp-trash { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-type="module">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* =========================================================================
+   JSONBin config
+   -------------------------------------------------------------------------
+   The access key below is scoped to ONLY this one bin, with read + update
+   permissions (no delete, no access to any other bin on the account). That
+   scoping is what makes it safe to ship inside public, static HTML like
+   this. Never put an X-Master-Key in client-side code.
+   ========================================================================= */
+const BIN_ID = "6a4f0cfaf5f4af5e2975308f";
+const ACCESS_KEY = "$2a$10$kMRK.fJVTIDXrEeBtYz6EuYGlSqxgvBXuCpIoI76RV3CBEKx5Vt5C";
+const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+
+async function loadData() {
+  const res = await fetch(`${BIN_URL}/latest`, {
+    headers: { "X-Access-Key": ACCESS_KEY },
+  });
+  if (!res.ok) throw new Error("Load failed: " + res.status);
+  const json = await res.json();
+  return json.record;
+}
+
+async function saveData(data) {
+  const res = await fetch(BIN_URL, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Access-Key": ACCESS_KEY,
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Save failed: " + res.status);
+  return res.json();
+}
+
+const ADMIN_CODE = "pb2026";
+
+const FALLBACK_DATA = {
+  title: "Bryan's Bachelor Party",
+  hotelTotal: 2337.93,
+  budgetTotal: 2337.96,
+  guests: [
+    { id: "bryan", name: "Bryan", category: "honor", paid: 0 },
+    { id: "andrew", name: "Andrew", category: "staying", paid: 375.74 },
+    { id: "enzo", name: "Enzo", category: "staying", paid: 0 },
+    { id: "jamil", name: "Jamil", category: "staying", paid: 375.74 },
+    { id: "mj", name: "MJ", category: "staying", paid: 375.74 },
+    { id: "tim", name: "Tim", category: "staying", paid: 375.74 },
+    { id: "zach", name: "Zach", category: "staying", paid: 187.5 },
+    { id: "brian", name: "Brian", category: "day", paid: 41.75 },
+    { id: "patrick", name: "Patrick", category: "day", paid: 41.75 },
+  ],
+};
+
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+const moneyComma = (n) =>
+  (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toFixed(2);
+
+const SECTIONS = [
+  { key: "honor", label: "Guest of Honor", emoji: "👑" },
+  { key: "staying", label: "Staying", emoji: "🛌" },
+  { key: "day", label: "Day Guests", emoji: "☀️" },
+];
+
+function BachelorPartyBudget() {
+  const [data, setData] = useState(FALLBACK_DATA);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [draftAmount, setDraftAmount] = useState("");
+  const [addingCategory, setAddingCategory] = useState(null);
+  const [newName, setNewName] = useState("");
+  const [savingNote, setSavingNote] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
+  const saveTimer = useRef(null);
+  const inputRef = useRef(null);
+  const codeInputRef = useRef(null);
+
+  // Load from JSONBin on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const record = await loadData();
+        if (record) setData(record);
+      } catch (e) {
+        setLoadError("Couldn't reach JSONBin — showing local data. Changes won't be saved until this is fixed.");
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+
+  // Debounced save to JSONBin whenever data changes (after initial load)
+  useEffect(() => {
+    if (!loaded) return;
+    setSavingNote("Saving…");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await saveData(data);
+        setSavingNote("Saved");
+        setTimeout(() => setSavingNote(""), 1200);
+      } catch (e) {
+        setSavingNote("Save failed");
+      }
+    }, 600);
+    return () => clearTimeout(saveTimer.current);
+  }, [data, loaded]);
+
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  useEffect(() => {
+    if (showCodeModal && codeInputRef.current) codeInputRef.current.focus();
+  }, [showCodeModal]);
+
+  const stayingCount = data.guests.filter((g) => g.category === "staying").length;
+  const dayCount = data.guests.filter((g) => g.category === "day").length;
+  const payerCount = stayingCount + dayCount;
+  const hotelOccupants = stayingCount + 1;
+
+  const hotelSplit = hotelOccupants > 0 ? round2(data.hotelTotal / hotelOccupants) : 0;
+  const bryanSplit = payerCount > 0 ? round2(hotelSplit / payerCount) : 0;
+
+  const guestTotal = useCallback(
+    (guest) => {
+      if (guest.category === "honor") return 0;
+      if (guest.category === "staying") return round2(hotelSplit + bryanSplit);
+      return bryanSplit;
+    },
+    [hotelSplit, bryanSplit]
+  );
+
+  const owed = round2(data.guests.reduce((sum, g) => sum + guestTotal(g), 0));
+  const collected = round2(data.guests.reduce((sum, g) => sum + (g.category === "honor" ? 0 : g.paid), 0));
+  const left = round2(owed - collected);
+
+  const statusFor = (guest) => {
+    if (guest.category === "honor") return "covered";
+    const total = guestTotal(guest);
+    if (guest.paid <= 0) return "unpaid";
+    if (guest.paid >= total - 0.005) return "paid";
+    return "partial";
+  };
+
+  const updatePaid = (id, amount) => {
+    setData((d) => ({
+      ...d,
+      guests: d.guests.map((g) => (g.id === id ? { ...g, paid: Math.max(0, round2(amount)) } : g)),
+    }));
+  };
+
+  const reallyOpenEditor = (guest) => {
+    if (guest.category === "honor") return;
+    setEditingId(guest.id);
+    setDraftAmount(guest.paid ? String(guest.paid) : "");
+  };
+
+  const requestAdmin = (action) => {
+    if (isAdmin) {
+      runAction(action);
+      return;
+    }
+    setPendingAction(action);
+    setCodeInput("");
+    setCodeError("");
+    setShowCodeModal(true);
+  };
+
+  const runAction = (action) => {
+    if (!action) return;
+    if (action.type === "editMode") setEditMode((v) => !v);
+    if (action.type === "editGuest") {
+      const guest = data.guests.find((g) => g.id === action.guestId);
+      if (guest) reallyOpenEditor(guest);
+    }
+  };
+
+  const submitCode = () => {
+    if (codeInput === ADMIN_CODE) {
+      setIsAdmin(true);
+      setShowCodeModal(false);
+      const action = pendingAction;
+      setPendingAction(null);
+      runAction(action);
+    } else {
+      setCodeError("Incorrect code");
+    }
+  };
+
+  const lockAdmin = () => {
+    setIsAdmin(false);
+    setEditMode(false);
+    setEditingId(null);
+  };
+
+  const saveEditor = (guest) => {
+    const val = parseFloat(draftAmount);
+    updatePaid(guest.id, isNaN(val) ? 0 : val);
+    setEditingId(null);
+  };
+
+  const removeGuest = (id) => setData((d) => ({ ...d, guests: d.guests.filter((g) => g.id !== id) }));
+
+  const addGuest = (category) => {
+    const name = newName.trim();
+    if (!name) {
+      setAddingCategory(null);
+      return;
+    }
+    setData((d) => ({
+      ...d,
+      guests: [...d.guests, { id: `${category}-${Date.now()}`, name, category, paid: 0 }],
+    }));
+    setNewName("");
+    setAddingCategory(null);
+  };
+
+  const badgeStyle = {
+    covered: { bg: "#EDE9FE", fg: "#7C3AED", label: "Covered" },
+    paid: { bg: "#DCFCE7", fg: "#16A34A", label: "✅ Paid" },
+    unpaid: { bg: "#FBE0E0", fg: "#DC2626", label: "Unpaid" },
+    partial: { bg: "#FDF1C8", fg: "#B45309", label: "Partial" },
+  };
+
+  return (
+    <div
+      style={{
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif",
+        background: "#F3F2F6",
+        minHeight: "100vh",
+        padding: "12px 12px 14px",
+        color: "#1F1B2E",
+        fontSize: 14,
+      }}
+    >
+      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+        {loadError && (
+          <div
+            style={{
+              background: "#FBE0E0",
+              color: "#B42318",
+              fontSize: 11.5,
+              fontWeight: 600,
+              borderRadius: 10,
+              padding: "8px 12px",
+              marginBottom: 8,
+            }}
+          >
+            {loadError}
+          </div>
+        )}
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22, lineHeight: 1 }}>🎉</span>
+            <h1
+              style={{
+                fontWeight: 800,
+                fontSize: 20,
+                margin: 0,
+                color: "#1F1B2E",
+                letterSpacing: "-0.01em",
+                lineHeight: 1.15,
+              }}
+            >
+              {data.title}
+            </h1>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isAdmin && (
+              <button
+                className="bp-icon-btn"
+                onClick={lockAdmin}
+                aria-label="Lock admin access"
+                style={{
+                  border: "none",
+                  background: "#FFFFFF",
+                  color: "#9C97AB",
+                  borderRadius: 999,
+                  width: 30,
+                  height: 30,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 1px 3px rgba(31,27,46,0.12)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                🔓
+              </button>
+            )}
+            <button
+              className="bp-icon-btn"
+              onClick={() => requestAdmin({ type: "editMode" })}
+              aria-label={isAdmin ? (editMode ? "Done editing" : "Edit budget") : "Admin login"}
+              style={{
+                border: "none",
+                background: editMode ? "#7C3AED" : "#FFFFFF",
+                color: editMode ? "#fff" : "#7C3AED",
+                borderRadius: 999,
+                width: 30,
+                height: 30,
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 1px 3px rgba(31,27,46,0.12)",
+                cursor: "pointer",
+                fontSize: 14,
+              }}
+            >
+              {!isAdmin ? "🔒" : editMode ? "✓" : "✏️"}
+            </button>
+          </div>
+        </div>
+
+        {/* Summary cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 8 }}>
+          {[
+            { label: "Total", value: data.budgetTotal, color: "#7C3AED", fmt: moneyComma },
+            { label: "Owed", value: owed, color: "#2563EB", fmt: money },
+            { label: "Collected", value: collected, color: "#16A34A", fmt: money },
+            { label: "Left", value: left, color: "#DC2626", fmt: money },
+          ].map((c) => (
+            <div
+              key={c.label}
+              style={{
+                background: "#fff",
+                borderRadius: 12,
+                padding: "7px 4px",
+                textAlign: "center",
+                boxShadow: "0 1px 2px rgba(31,27,46,0.06)",
+                border: "1px solid #ECEAF1",
+              }}
+            >
+              <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", color: "#9C97AB", marginBottom: 2 }}>
+                {c.label.toUpperCase()}
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: c.color }}>{c.fmt(c.value)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Split formula / editable totals */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: "7px 14px",
+            marginBottom: 8,
+            textAlign: "center",
+            border: "1px solid #ECEAF1",
+            boxShadow: "0 1px 2px rgba(31,27,46,0.06)",
+            fontSize: 12.5,
+          }}
+        >
+          {editMode ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, textAlign: "left" }}>
+              <label style={{ fontSize: 11, color: "#9C97AB", fontWeight: 600 }}>
+                Hotel bill (split among everyone who stayed, incl. Bryan)
+                <input
+                  className="bp-input"
+                  type="number"
+                  value={data.hotelTotal}
+                  onChange={(e) => setData((d) => ({ ...d, hotelTotal: parseFloat(e.target.value) || 0 }))}
+                  style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 13 }}
+                />
+              </label>
+              <label style={{ fontSize: 11, color: "#9C97AB", fontWeight: 600 }}>
+                Trip total (shown on summary card)
+                <input
+                  className="bp-input"
+                  type="number"
+                  value={data.budgetTotal}
+                  onChange={(e) => setData((d) => ({ ...d, budgetTotal: parseFloat(e.target.value) || 0 }))}
+                  style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 13 }}
+                />
+              </label>
+            </div>
+          ) : (
+            <span style={{ color: "#5B5570" }}>
+              ÷{hotelOccupants} = <strong style={{ color: "#2563EB" }}>{money(hotelSplit)}/person</strong>
+              <span style={{ color: "#C7C2D3" }}> · </span>
+              Bryan's ÷{payerCount} = <strong style={{ color: "#7C3AED" }}>{money(bryanSplit)} extra</strong>
+            </span>
+          )}
+        </div>
+
+        {/* Table */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 16,
+            overflow: "hidden",
+            border: "1px solid #ECEAF1",
+            boxShadow: "0 1px 3px rgba(31,27,46,0.06)",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.3fr 0.9fr 0.9fr 0.9fr 0.9fr",
+              padding: "6px 14px",
+              fontSize: 8.5,
+              fontWeight: 700,
+              letterSpacing: "0.05em",
+              color: "#ADA8BC",
+              borderBottom: "1px solid #F1EFF5",
+            }}
+          >
+            <span>NAME</span>
+            <span>HOTEL</span>
+            <span>BRYAN'S</span>
+            <span>TOTAL</span>
+            <span>STATUS</span>
+          </div>
+
+          {SECTIONS.map((section) => {
+            const sectionGuests = data.guests.filter((g) => g.category === section.key);
+            return (
+              <div key={section.key}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "4px 14px",
+                    background: "#F7F6FA",
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    letterSpacing: "0.05em",
+                    color: "#9C97AB",
+                  }}
+                >
+                  <span style={{ fontSize: 11 }}>{section.emoji}</span>
+                  {section.label.toUpperCase()}
+                </div>
+
+                {sectionGuests.map((guest) => {
+                  const total = guestTotal(guest);
+                  const status = statusFor(guest);
+                  const style = badgeStyle[status];
+                  const isEditing = editingId === guest.id;
+                  const isHonor = guest.category === "honor";
+
+                  return (
+                    <div
+                      className="bp-row"
+                      key={guest.id}
+                      style={{ borderBottom: "1px solid #F4F2F8", background: isHonor ? "#F6F1FE" : "#fff" }}
+                    >
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1.3fr 0.9fr 0.9fr 0.9fr 0.9fr",
+                          alignItems: "center",
+                          padding: "6px 14px",
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: isHonor ? "#7C3AED" : "#1F1B2E",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          {isHonor && <span style={{ fontSize: 12 }}>👑</span>}
+                          {guest.name}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#4B4560" }}>
+                          {guest.category === "staying" ? money(hotelSplit) : "—"}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#7C3AED" }}>{isHonor ? "—" : money(bryanSplit)}</span>
+                        <span style={{ fontWeight: 700, fontSize: 12 }}>{isHonor ? "—" : money(total)}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <button
+                            onClick={() => requestAdmin({ type: "editGuest", guestId: guest.id })}
+                            disabled={isHonor}
+                            style={{
+                              border: "none",
+                              cursor: isHonor ? "default" : "pointer",
+                              background: style.bg,
+                              color: style.fg,
+                              fontWeight: 700,
+                              fontSize: 10.5,
+                              borderRadius: 999,
+                              padding: "3px 9px",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {style.label}
+                          </button>
+                          {editMode && !isHonor && (
+                            <button
+                              className="bp-trash"
+                              onClick={() => removeGuest(guest.id)}
+                              aria-label={`Remove ${guest.name}`}
+                              style={{ border: "none", background: "transparent", color: "#C7C2D3", cursor: "pointer", fontSize: 12 }}
+                            >
+                              🗑
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {!isHonor && !isEditing && (
+                        <div style={{ padding: "0 14px 5px", marginTop: -4 }}>
+                          {status === "paid" && (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#16A34A" }}>✓ Settled</span>
+                          )}
+                          {status === "partial" && (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#DC2626" }}>
+                              Balance: {money(round2(total - guest.paid))}
+                            </span>
+                          )}
+                          {status === "unpaid" && (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#DC2626" }}>
+                              Balance: {money(total)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {isEditing && (
+                        <div style={{ padding: "0 14px 8px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, color: "#9C97AB" }}>Amount paid</span>
+                          <input
+                            ref={inputRef}
+                            className="bp-input"
+                            type="number"
+                            step="0.01"
+                            value={draftAmount}
+                            onChange={(e) => setDraftAmount(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEditor(guest);
+                              if (e.key === "Escape") setEditingId(null);
+                            }}
+                            style={{ width: 90, padding: "5px 8px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 13 }}
+                          />
+                          <button
+                            onClick={() => updatePaid(guest.id, total)}
+                            style={{ fontSize: 12, fontWeight: 600, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#16A34A", borderRadius: 8, padding: "5px 9px", cursor: "pointer" }}
+                          >
+                            Mark paid
+                          </button>
+                          <button
+                            onClick={() => updatePaid(guest.id, 0)}
+                            style={{ fontSize: 12, fontWeight: 600, border: "1px solid #FBC7C7", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, padding: "5px 9px", cursor: "pointer" }}
+                          >
+                            Mark unpaid
+                          </button>
+                          <button
+                            onClick={() => saveEditor(guest)}
+                            style={{ fontSize: 12, fontWeight: 700, border: "none", background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            aria-label="Cancel"
+                            style={{ border: "none", background: "transparent", color: "#B0A4CC", cursor: "pointer", fontSize: 14 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {editMode &&
+                  (addingCategory === section.key ? (
+                    <div style={{ display: "flex", gap: 6, padding: "6px 14px", alignItems: "center" }}>
+                      <input
+                        autoFocus
+                        className="bp-input"
+                        placeholder="Guest name"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") addGuest(section.key);
+                          if (e.key === "Escape") setAddingCategory(null);
+                        }}
+                        style={{ flex: 1, padding: "4px 9px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 12 }}
+                      />
+                      <button
+                        onClick={() => addGuest(section.key)}
+                        style={{ border: "none", background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ) : (
+                    section.key !== "honor" && (
+                      <button
+                        onClick={() => {
+                          setAddingCategory(section.key);
+                          setNewName("");
+                        }}
+                        style={{ display: "flex", alignItems: "center", gap: 3, border: "none", background: "transparent", color: "#7C3AED", fontSize: 11, fontWeight: 700, padding: "6px 14px", cursor: "pointer" }}
+                      >
+                        + Add {section.label === "Staying" ? "staying guest" : "day guest"}
+                      </button>
+                    )
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ textAlign: "center", fontSize: 10.5, color: "#ADA8BC", marginTop: 8, minHeight: 14 }}>
+          {isAdmin
+            ? editMode
+              ? "Editing budget — tap the check to finish"
+              : "Tap status badge to log a payment · Changes are saved automatically"
+            : "Viewing only · admin login required to update"}
+          {savingNote && <span style={{ marginLeft: 6, color: "#9C97AB" }}>· {savingNote}</span>}
+        </div>
+      </div>
+
+      {showCodeModal && (
+        <div
+          onClick={() => setShowCodeModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(31,27,46,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              padding: "20px 18px",
+              width: "100%",
+              maxWidth: 300,
+              boxShadow: "0 10px 30px rgba(31,27,46,0.25)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 999,
+                  background: "#EDE9FE",
+                  color: "#7C3AED",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  fontSize: 14,
+                }}
+              >
+                🔒
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "#1F1B2E" }}>Admin login</div>
+            </div>
+            <p style={{ fontSize: 12.5, color: "#5B5570", margin: "0 0 10px" }}>
+              Enter the admin code to log payments or edit the budget.
+            </p>
+            <input
+              ref={codeInputRef}
+              className="bp-input"
+              type="password"
+              inputMode="text"
+              autoComplete="off"
+              value={codeInput}
+              onChange={(e) => {
+                setCodeInput(e.target.value);
+                setCodeError("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCode();
+                if (e.key === "Escape") setShowCodeModal(false);
+              }}
+              placeholder="Admin code"
+              style={{
+                width: "100%",
+                padding: "9px 11px",
+                borderRadius: 9,
+                border: codeError ? "1px solid #DC2626" : "1px solid #DDD3F0",
+                fontSize: 14,
+                marginBottom: 6,
+              }}
+            />
+            {codeError && (
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>{codeError}</div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => setShowCodeModal(false)}
+                style={{
+                  flex: 1,
+                  border: "1px solid #E4E0EC",
+                  background: "#fff",
+                  color: "#5B5570",
+                  borderRadius: 9,
+                  padding: "9px 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitCode}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  background: "#7C3AED",
+                  color: "#fff",
+                  borderRadius: 9,
+                  padding: "9px 0",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Unlock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<BachelorPartyBudget />);
+</script>
+</body>
+</html>
