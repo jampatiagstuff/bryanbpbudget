@@ -206,7 +206,7 @@ function BachelorPartyBudget() {
 
   const guestTotal = useCallback(
     (guest) => {
-      if (guest.category === "honor") return 0;
+      if (guest.category === "honor") return round2(guestActivityTotal(guest.id));
       let base = 0;
       if (guest.category === "staying") base = hotelSplit + bryanSplit;
       if (guest.category === "day") base = bryanSplit;
@@ -222,7 +222,8 @@ function BachelorPartyBudget() {
   const netFor = (guest) => round2(guestTotal(guest) - guest.paid); // positive = still owes; negative = owed money back
 
   const statusFor = (guest) => {
-    if (guest.category === "honor") return "covered";
+    const total = guestTotal(guest);
+    if (guest.category === "honor" && total === 0 && guest.paid === 0) return "covered";
     const net = netFor(guest);
     if (net <= -0.005) return "owed";
     if (Math.abs(net) <= 0.005) return "paid";
@@ -238,7 +239,6 @@ function BachelorPartyBudget() {
   };
 
   const reallyOpenEditor = (guest) => {
-    if (guest.category === "honor") return;
     setEditingId(guest.id);
     setDraftAmount(guest.paid ? String(guest.paid) : "");
   };
@@ -354,7 +354,7 @@ function BachelorPartyBudget() {
     owed: { bg: "#DBEAFE", fg: "#2563EB", label: "💰 Owed" },
   };
 
-  const eligibleParticipants = data.guests.filter((g) => g.category !== "honor");
+  const eligibleParticipants = data.guests; // anyone, including Bryan, can be an activity participant or payer
 
   return (
     <div
@@ -636,8 +636,9 @@ function BachelorPartyBudget() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.05fr 0.55fr 0.6fr 0.85fr 0.65fr 0.95fr",
-                  padding: "6px 8px",
+                  gridTemplateColumns: "0.95fr 0.5fr 0.58fr 0.8fr 0.62fr 0.95fr",
+                  padding: "6px 6px",
+                  gap: 6,
                   fontSize: 7.5,
                   fontWeight: 700,
                   letterSpacing: "0.03em",
@@ -698,10 +699,10 @@ function BachelorPartyBudget() {
                           <div
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "1.05fr 0.55fr 0.6fr 0.85fr 0.65fr 0.95fr",
+                              gridTemplateColumns: "0.95fr 0.5fr 0.58fr 0.8fr 0.62fr 0.95fr",
                               alignItems: "center",
-                              padding: "6px 8px",
-                              gap: 3,
+                              padding: "6px 6px",
+                              gap: 6,
                             }}
                           >
                             <span
@@ -727,16 +728,17 @@ function BachelorPartyBudget() {
                               {!isHonor && data.splitBryanShare ? money(bryanSplit) : "—"}
                             </span>
                             <span style={{ fontSize: 10.5, color: "#B45309" }}>
-                              {!isHonor && actTotal > 0 ? money(actTotal) : "—"}
+                              {actTotal !== 0 ? money(actTotal) : "—"}
                             </span>
-                            <span style={{ fontWeight: 700, fontSize: 10.5 }}>{isHonor ? "—" : money(total)}</span>
+                            <span style={{ fontWeight: 700, fontSize: 10.5 }}>
+                              {isHonor && total === 0 ? "—" : money(total)}
+                            </span>
                             <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                               <button
                                 onClick={() => requestAdmin({ type: "editGuest", guestId: guest.id })}
-                                disabled={isHonor}
                                 style={{
                                   border: "none",
-                                  cursor: isHonor ? "default" : "pointer",
+                                  cursor: "pointer",
                                   background: style.bg,
                                   color: style.fg,
                                   fontWeight: 700,
@@ -761,31 +763,17 @@ function BachelorPartyBudget() {
                             </div>
                           </div>
 
-                          {!isHonor && !isEditing && (
-                            <div style={{ padding: "0 8px 5px", marginTop: -4 }}>
-                              {status === "paid" && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#16A34A" }}>
-                                  ✓ Settled <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
-                                </span>
-                              )}
-                              {status === "owed" && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB" }}>
-                                  Owed back: {money(round2(guest.paid - total))}{" "}
-                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
-                                </span>
-                              )}
-                              {status === "partial" && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
-                                  Balance: {money(round2(total - guest.paid))}{" "}
-                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
-                                </span>
-                              )}
-                              {status === "unpaid" && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
-                                  Balance: {money(total)}{" "}
-                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
-                                </span>
-                              )}
+                          {!isEditing && status !== "covered" && (
+                            <div style={{ padding: "0 6px 5px", marginTop: -4, display: "flex", justifyContent: "space-between", gap: 6 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: status === "owed" ? "#2563EB" : status === "paid" ? "#16A34A" : "#DC2626" }}>
+                                {status === "paid" && "✓ Settled"}
+                                {status === "owed" && `Owed back: ${money(round2(guest.paid - total))}`}
+                                {status === "partial" && `Balance: ${money(round2(total - guest.paid))}`}
+                                {status === "unpaid" && `Balance: ${money(total)}`}
+                              </span>
+                              <span style={{ fontSize: 10, fontWeight: 600, color: "#9C97AB", textAlign: "right", flexShrink: 0 }}>
+                                Paid {money(guest.paid)}
+                              </span>
                             </div>
                           )}
 
@@ -993,22 +981,28 @@ function BachelorPartyBudget() {
                               cursor: "pointer",
                             }}
                           >
-                            {g.name}
+                            {g.category === "honor" ? `👑 ${g.name}` : g.name}
                           </button>
                         );
                       })}
                     </div>
-                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11.5, color: "#5B5570", fontWeight: 600, marginBottom: 10 }}>
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11.5, color: newActivityParticipants.includes("bryan") ? "#C7C2D3" : "#5B5570", fontWeight: 600, marginBottom: 4 }}>
                       Split Bryan's share for this activity
                       <span
-                        onClick={() => setNewActivitySplitBryan((v) => !v)}
+                        onClick={() => {
+                          if (!newActivityParticipants.includes("bryan")) setNewActivitySplitBryan((v) => !v);
+                        }}
                         style={{
                           width: 38,
                           height: 21,
                           borderRadius: 999,
-                          background: newActivitySplitBryan ? "#7C3AED" : "#DDD8E8",
+                          background: newActivityParticipants.includes("bryan")
+                            ? "#EAE7F0"
+                            : newActivitySplitBryan
+                            ? "#7C3AED"
+                            : "#DDD8E8",
                           position: "relative",
-                          cursor: "pointer",
+                          cursor: newActivityParticipants.includes("bryan") ? "not-allowed" : "pointer",
                           transition: "background 0.15s ease",
                           flexShrink: 0,
                         }}
@@ -1017,7 +1011,7 @@ function BachelorPartyBudget() {
                           style={{
                             position: "absolute",
                             top: 2,
-                            left: newActivitySplitBryan ? 19 : 2,
+                            left: newActivitySplitBryan && !newActivityParticipants.includes("bryan") ? 19 : 2,
                             width: 17,
                             height: 17,
                             borderRadius: 999,
@@ -1028,6 +1022,11 @@ function BachelorPartyBudget() {
                         />
                       </span>
                     </label>
+                    <p style={{ fontSize: 10, color: "#B0A4CC", margin: "0 0 10px" }}>
+                      {newActivityParticipants.includes("bryan")
+                        ? "Bryan is selected as a participant, so he'll owe his own share directly — this toggle is off."
+                        : "Turn on to have participants cover Bryan's share automatically, without adding him as a participant."}
+                    </p>
                     <label style={{ fontSize: 11, color: "#9C97AB", fontWeight: 600, display: "block", marginBottom: 10 }}>
                       Who paid? (so we know who's owed money back)
                       <select
@@ -1036,13 +1035,16 @@ function BachelorPartyBudget() {
                         style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 13, background: "#fff", color: "#1F1B2E" }}
                       >
                         <option value="">— Not paid yet —</option>
-                        {eligibleParticipants.map((g) => (
+                        {data.guests.map((g) => (
                           <option key={g.id} value={g.id}>
-                            {g.name}
+                            {g.category === "honor" ? `👑 ${g.name}` : g.name}
                           </option>
                         ))}
                       </select>
                     </label>
+                    <p style={{ fontSize: 10.5, color: "#9C97AB", margin: "-6px 0 10px" }}>
+                      Bryan can be marked as the payer if he covers an activity — he'll show as owed the group's share back.
+                    </p>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
                         onClick={() => {
