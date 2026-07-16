@@ -95,7 +95,11 @@ function normalize(record) {
     ...FALLBACK_DATA,
     ...record,
     splitBryanShare: record && record.splitBryanShare !== undefined ? record.splitBryanShare : true,
-    activities: (record && record.activities) || [],
+    activities: ((record && record.activities) || []).map((a) => ({
+      splitBryanShare: false,
+      paidBy: null,
+      ...a,
+    })),
     guests: (record && record.guests) || FALLBACK_DATA.guests,
   };
 }
@@ -632,19 +636,23 @@ function BachelorPartyBudget() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.25fr 0.62fr 0.6fr 0.62fr 0.72fr 0.85fr",
+                  gridTemplateColumns: "1.05fr 0.55fr 0.6fr 0.85fr 0.65fr 0.95fr",
                   padding: "6px 8px",
                   fontSize: 7.5,
                   fontWeight: 700,
-                  letterSpacing: "0.04em",
+                  letterSpacing: "0.03em",
                   color: "#ADA8BC",
                   borderBottom: "1px solid #F1EFF5",
+                  alignItems: "end",
                 }}
               >
                 <span>NAME</span>
                 <span>HOTEL</span>
-                <span>BRY.</span>
-                <span>ACT.</span>
+                <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+                  <span>BRYAN'S</span>
+                  <span>SHARE</span>
+                </span>
+                <span>ACTIVITY</span>
                 <span>TOTAL</span>
                 <span>STATUS</span>
               </div>
@@ -690,7 +698,7 @@ function BachelorPartyBudget() {
                           <div
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "1.25fr 0.62fr 0.6fr 0.62fr 0.72fr 0.85fr",
+                              gridTemplateColumns: "1.05fr 0.55fr 0.6fr 0.85fr 0.65fr 0.95fr",
                               alignItems: "center",
                               padding: "6px 8px",
                               gap: 3,
@@ -756,21 +764,26 @@ function BachelorPartyBudget() {
                           {!isHonor && !isEditing && (
                             <div style={{ padding: "0 8px 5px", marginTop: -4 }}>
                               {status === "paid" && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#16A34A" }}>✓ Settled</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#16A34A" }}>
+                                  ✓ Settled <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
+                                </span>
                               )}
                               {status === "owed" && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB" }}>
-                                  Owed back: {money(round2(guest.paid - total))}
+                                  Owed back: {money(round2(guest.paid - total))}{" "}
+                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
                                 </span>
                               )}
                               {status === "partial" && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
-                                  Balance: {money(round2(total - guest.paid))}
+                                  Balance: {money(round2(total - guest.paid))}{" "}
+                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
                                 </span>
                               )}
                               {status === "unpaid" && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
-                                  Balance: {money(total)}
+                                  Balance: {money(total)}{" "}
+                                  <span style={{ color: "#9C97AB", fontWeight: 600 }}>· Paid {money(guest.paid)}</span>
                                 </span>
                               )}
                             </div>
