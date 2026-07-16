@@ -121,6 +121,8 @@ function BachelorPartyBudget() {
   const [newActivityName, setNewActivityName] = useState("");
   const [newActivityCost, setNewActivityCost] = useState("");
   const [newActivityParticipants, setNewActivityParticipants] = useState([]);
+  const [newActivitySplitBryan, setNewActivitySplitBryan] = useState(false);
+  const [newActivityPaidBy, setNewActivityPaidBy] = useState("");
   const saveTimer = useRef(null);
   const inputRef = useRef(null);
   const codeInputRef = useRef(null);
@@ -173,19 +175,28 @@ function BachelorPartyBudget() {
   const hotelSplit = hotelOccupants > 0 ? round2(data.hotelTotal / hotelOccupants) : 0;
   const bryanSplit = data.splitBryanShare && payerCount > 0 ? round2(hotelSplit / payerCount) : 0;
 
-  const activityShare = (activity) =>
-    activity.participantIds && activity.participantIds.length > 0
-      ? round2(activity.cost / activity.participantIds.length)
-      : 0;
+  const activityShare = (activity) => {
+    const n = activity.participantIds ? activity.participantIds.length : 0;
+    if (n === 0) return 0;
+    if (activity.splitBryanShare) {
+      const occupants = n + 1; // participants + Bryan
+      const base = round2(activity.cost / occupants);
+      const extra = round2(base / n); // Bryan's own share redistributed to participants
+      return round2(base + extra);
+    }
+    return round2(activity.cost / n);
+  };
+
+  const guestActivityCharge = (activity, guestId) => {
+    const inGroup = activity.participantIds && activity.participantIds.includes(guestId);
+    const share = activityShare(activity);
+    let charge = inGroup ? share : 0;
+    if (activity.paidBy === guestId) charge = round2(charge - activity.cost);
+    return charge;
+  };
 
   const guestActivityTotal = useCallback(
-    (guestId) =>
-      round2(
-        data.activities.reduce(
-          (sum, a) => sum + (a.participantIds && a.participantIds.includes(guestId) ? activityShare(a) : 0),
-          0
-        )
-      ),
+    (guestId) => round2(data.activities.reduce((sum, a) => sum + guestActivityCharge(a, guestId), 0)),
     [data.activities]
   );
 
@@ -204,12 +215,15 @@ function BachelorPartyBudget() {
   const collected = round2(data.guests.reduce((sum, g) => sum + (g.category === "honor" ? 0 : g.paid), 0));
   const left = round2(owed - collected);
 
+  const netFor = (guest) => round2(guestTotal(guest) - guest.paid); // positive = still owes; negative = owed money back
+
   const statusFor = (guest) => {
     if (guest.category === "honor") return "covered";
-    const total = guestTotal(guest);
-    if (guest.paid <= 0) return "unpaid";
-    if (guest.paid >= total - 0.005) return "paid";
-    return "partial";
+    const net = netFor(guest);
+    if (net <= -0.005) return "owed";
+    if (Math.abs(net) <= 0.005) return "paid";
+    if (guest.paid > 0) return "partial";
+    return "unpaid";
   };
 
   const updatePaid = (id, amount) => {
@@ -308,12 +322,21 @@ function BachelorPartyBudget() {
       ...d,
       activities: [
         ...d.activities,
-        { id: `activity-${Date.now()}`, name, cost: round2(cost), participantIds: newActivityParticipants },
+        {
+          id: `activity-${Date.now()}`,
+          name,
+          cost: round2(cost),
+          participantIds: newActivityParticipants,
+          splitBryanShare: newActivitySplitBryan,
+          paidBy: newActivityPaidBy || null,
+        },
       ],
     }));
     setNewActivityName("");
     setNewActivityCost("");
     setNewActivityParticipants([]);
+    setNewActivitySplitBryan(false);
+    setNewActivityPaidBy("");
     setAddingActivity(false);
   };
 
@@ -324,6 +347,7 @@ function BachelorPartyBudget() {
     paid: { bg: "#DCFCE7", fg: "#16A34A", label: "✅ Paid" },
     unpaid: { bg: "#FBE0E0", fg: "#DC2626", label: "Unpaid" },
     partial: { bg: "#FDF1C8", fg: "#B45309", label: "Partial" },
+    owed: { bg: "#DBEAFE", fg: "#2563EB", label: "💰 Owed" },
   };
 
   const eligibleParticipants = data.guests.filter((g) => g.category !== "honor");
@@ -734,6 +758,11 @@ function BachelorPartyBudget() {
                               {status === "paid" && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#16A34A" }}>✓ Settled</span>
                               )}
+                              {status === "owed" && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB" }}>
+                                  Owed back: {money(round2(guest.paid - total))}
+                                </span>
+                              )}
                               {status === "partial" && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
                                   Balance: {money(round2(total - guest.paid))}
@@ -869,17 +898,28 @@ function BachelorPartyBudget() {
                   .map((id) => data.guests.find((g) => g.id === id))
                   .filter(Boolean)
                   .map((g) => g.name);
+                const payer = activity.paidBy ? data.guests.find((g) => g.id === activity.paidBy) : null;
                 return (
                   <div key={activity.id} style={{ padding: "10px 14px", borderBottom: "1px solid #F4F2F8" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1F1B2E" }}>{activity.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 700, fontSize: 14, color: "#1F1B2E" }}>{activity.name}</span>
+                          {activity.splitBryanShare && (
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: "#7C3AED", background: "#EDE9FE", borderRadius: 999, padding: "1px 7px" }}>
+                              👑 incl. Bryan's
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: 11.5, color: "#5B5570", marginTop: 2 }}>
                           {money(activity.cost)} total ·{" "}
                           <strong style={{ color: "#B45309" }}>{money(share)}/person</strong> ×{" "}
                           {activity.participantIds.length}
                         </div>
                         <div style={{ fontSize: 11, color: "#9C97AB", marginTop: 3 }}>{names.join(", ")}</div>
+                        <div style={{ fontSize: 11, marginTop: 3, fontWeight: 600, color: payer ? "#2563EB" : "#B0A4CC" }}>
+                          {payer ? `💰 Paid by ${payer.name} — owed back for others' shares` : "Not paid yet"}
+                        </div>
                       </div>
                       {editMode && (
                         <button
@@ -945,6 +985,51 @@ function BachelorPartyBudget() {
                         );
                       })}
                     </div>
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11.5, color: "#5B5570", fontWeight: 600, marginBottom: 10 }}>
+                      Split Bryan's share for this activity
+                      <span
+                        onClick={() => setNewActivitySplitBryan((v) => !v)}
+                        style={{
+                          width: 38,
+                          height: 21,
+                          borderRadius: 999,
+                          background: newActivitySplitBryan ? "#7C3AED" : "#DDD8E8",
+                          position: "relative",
+                          cursor: "pointer",
+                          transition: "background 0.15s ease",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: 2,
+                            left: newActivitySplitBryan ? 19 : 2,
+                            width: 17,
+                            height: 17,
+                            borderRadius: 999,
+                            background: "#fff",
+                            transition: "left 0.15s ease",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                          }}
+                        />
+                      </span>
+                    </label>
+                    <label style={{ fontSize: 11, color: "#9C97AB", fontWeight: 600, display: "block", marginBottom: 10 }}>
+                      Who paid? (so we know who's owed money back)
+                      <select
+                        value={newActivityPaidBy}
+                        onChange={(e) => setNewActivityPaidBy(e.target.value)}
+                        style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 8, border: "1px solid #DDD3F0", fontSize: 13, background: "#fff", color: "#1F1B2E" }}
+                      >
+                        <option value="">— Not paid yet —</option>
+                        {eligibleParticipants.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
                         onClick={() => {
@@ -952,6 +1037,8 @@ function BachelorPartyBudget() {
                           setNewActivityName("");
                           setNewActivityCost("");
                           setNewActivityParticipants([]);
+                          setNewActivitySplitBryan(false);
+                          setNewActivityPaidBy("");
                         }}
                         style={{ flex: 1, border: "1px solid #E4E0EC", background: "#fff", color: "#5B5570", borderRadius: 9, padding: "8px 0", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
                       >
